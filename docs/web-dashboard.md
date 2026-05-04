@@ -17,7 +17,7 @@ The web server runs the runner state machine in a background thread, so you only
 |---|---|
 | **Dashboard** | Runner state (`CHILLING` / `BURNING`), burn deadline countdown, last usage check (pct + reset minutes + status), queue counts, `Run All (once)` button, `Check usage now` button |
 | **Tasks** | Sortable by ID / priority / created / finished. Filter by status. Tasks with a `session_id` show a purple `↻ RESUME` pill |
-| **Task detail** | Read-only by default. For pending tasks, `Edit` opens a full form (dir / prompt / level / priority / depends_on / max_minutes / run_policy / tags / dry_run). Switching `run_policy` to/from `this_session` recomputes or clears `eligible_at`. `Move to Unfinished` parks a pending task. For tasks with `session_id`, a banner shows the resumed conversation's last user message + click-to-copy session id (loaded lazily, with cwd-verification against the transcript so a slug collision can't surface a different project's chat). `Run This Task` / `Cancel Task` / `Terminal Output` controls |
+| **Task detail** | Read-only by default. For pending tasks, `Edit` opens a full form (dir / prompt / level / priority / depends_on / max_minutes / run_policy / tags / dry_run). Switching `run_policy` to/from `this_session` recomputes or clears `eligible_at`. `Move to Unfinished` parks a pending task. For tasks with `session_id`, a banner shows the resumed conversation's last user message + click-to-copy session id (loaded lazily, with cwd-verification against the transcript so a slug collision can't surface a different project's chat). `Run This Task` / `Cancel Task` / `Terminal Output` controls. After a run lands, the detail also shows tokens, USD cost, and a `Transcript` link that opens the on-disk Claude Code session JSONL via the file viewer |
 | **Add task** | Form with folder picker, prompt, when-to-run, level, priority, dry-run, tags, deps |
 | **File browser** | Click `Files` on any task detail to browse that task's working directory. Text files render inline (256 KB cap, null-byte probe rejects binaries). Images and PDFs preview via `<img>` / `<embed>`. SVG is intentionally excluded from inline rendering (stored-XSS vector) and falls back to text source. `..` navigates freely past the task dir — no sandbox, read-only |
 | **Logs** | Date picker + task ID filter |
@@ -75,8 +75,9 @@ All endpoints require a valid session cookie if `QUEUE_WORKER_PASSWORD` is set.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET`  | `/api/tasks/{id}/output` | Tail per-task `claude -p` output (supports `?offset=N` for incremental polling) |
+| `GET`  | `/api/tasks/{id}/output` | Tail per-task structured trace (one rendered line per stream-json event — tool calls, tool results, assistant turns, init / cost / token totals). Supports `?offset=N` for incremental polling |
 | `GET`  | `/api/tasks/{id}/resume-info` | Summary of the Claude conversation a queued task will resume. Verifies the transcript's recorded `cwd` matches the task before returning. Distinct error shapes per failure: `no_session_id` / `invalid_session_id` (400), `project_dir_not_found` / `transcript_not_found` (404), `transcript_unreadable` (422) |
+| `GET`  | `/api/tasks/{id}/transcript` | Locate the on-disk Claude Code transcript for THIS run (uses `actual_session_id` written by the executor). Returns `{session_id, transcript_path, project_dir, file_size}`. Distinct from `/resume-info` which reports the resume *source* — this one reports the *output* of the run. 404 on missing actual_session_id or transcript |
 | `GET`  | `/api/context/{id}` | Render the full `CLAUDE.md` that will be injected for the task |
 | `GET`  | `/api/logs` | Daily logs, optional `?date=` and `?task_id=` filters |
 | `GET`  | `/api/usage-history` | Usage chart data parsed from `usage_history.csv` |

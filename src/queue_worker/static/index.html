@@ -25,6 +25,8 @@
   --text: #e0e0e8; --text2: #8b8fa3; --accent: #6c8aff;
   --blue: #3b82f6; --amber: #f59e0b; --green: #22c55e;
   --purple: #a855f7; --red: #ef4444;
+  /* Vertical offset for content under the mobile-only fixed hamburger. */
+  --mobile-topbar: 50px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -39,13 +41,23 @@ textarea { font-family: 'SF Mono', 'Fira Code', monospace; min-height: 120px; re
 select { appearance: auto; }
 label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 4px; }
 
-.sidebar { width: 200px; background: var(--bg2); border-right: 1px solid var(--border);
-           padding: 16px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; }
+/* Sidebar is a mobile-first off-screen drawer; desktop @media at the bottom
+   of this stylesheet restores it to a static 200px column. Mobile-first
+   ordering avoids a layout shift on phones where the desktop layout would
+   briefly render before the narrow-viewport rule kicks in. */
+.sidebar { position: fixed; top: 0; bottom: 0; left: 0;
+           width: 240px; z-index: 25;
+           background: var(--bg2); border-right: 1px solid var(--border);
+           padding: var(--mobile-topbar) 16px 16px 16px;
+           flex-shrink: 0; display: flex; flex-direction: column; gap: 4px;
+           transform: translateX(-100%);
+           transition: transform 0.2s ease-out; }
+.sidebar.open { transform: translateX(0); }
 .sidebar h1 { font-size: 15px; margin-bottom: 12px; color: var(--accent); }
 .sidebar button { text-align: left; border: none; background: none; padding: 8px 10px;
                   border-radius: 6px; color: var(--text2); font-size: 13px; }
 .sidebar button:hover, .sidebar button.active { background: var(--bg3); color: var(--text); }
-.main { flex: 1; overflow-y: auto; padding: 24px; }
+.main { flex: 1; overflow-y: auto; padding: var(--mobile-topbar) 24px 24px 24px; }
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px;
          font-weight: 600; text-transform: uppercase; }
@@ -76,12 +88,23 @@ label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 4px
 .state-meta { font-size: 12px; color: var(--text2); margin-top: 8px; line-height: 1.6; }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch;
+                /* Hidden by default; .is-scrolling (set by JS for ~800ms after
+                   each scroll event) and :hover make the thumb visible. */
+                scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.table-scroll.is-scrolling, .table-scroll:hover { scrollbar-color: var(--bg3) transparent; }
+.table-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+.table-scroll::-webkit-scrollbar-track { background: transparent; }
+.table-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+.table-scroll.is-scrolling::-webkit-scrollbar-thumb,
+.table-scroll:hover::-webkit-scrollbar-thumb { background: var(--bg3); }
+.table-scroll > table { width: max-content; min-width: 100%; }
+.table-scroll th, .table-scroll td { white-space: nowrap; }
 th { text-align: left; color: var(--text2); font-size: 11px; text-transform: uppercase;
      padding: 8px 10px; border-bottom: 1px solid var(--border); }
 td { padding: 10px; border-bottom: 1px solid var(--border); }
 tr:hover { background: var(--bg2); cursor: pointer; }
 .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; }
-.truncate { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .form-group { margin-bottom: 14px; }
 .form-row { display: flex; gap: 12px; }
@@ -219,16 +242,32 @@ tr:hover { background: var(--bg2); cursor: pointer; }
   color: var(--text2);
   margin-top: 8px;
 }
+.hamburger { position: fixed; top: 10px; left: 10px; z-index: 30;
+             font-size: 18px; line-height: 1; padding: 6px 10px; }
+.nav-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 20; }
 @media (max-width: 768px) {
   .detail-layout > .panel.is-open { display: none; }
   .detail-layout > .panel.is-open.is-active { display: block; }
 }
+@media (min-width: 769px) {
+  /* Undo the drawer: sidebar back to static column, hamburger hidden. */
+  .sidebar { position: static; transform: none; transition: none;
+             width: 200px; padding: 16px; z-index: auto; }
+  .main { padding: 24px; }
+  .hamburger, .nav-backdrop { display: none; }
+}
 </style>
 </head>
-<body x-data="app()" x-init="init()">
+<body x-data="app()" x-init="init()" @keydown.escape.window="mobileNavOpen = false">
+
+<!-- Mobile-only nav trigger + scrim. Hidden via CSS above 768px. -->
+<button class="hamburger" @click="mobileNavOpen = !mobileNavOpen"
+        :aria-expanded="mobileNavOpen" aria-label="Toggle navigation">☰</button>
+<div class="nav-backdrop" x-show="mobileNavOpen" @click="mobileNavOpen = false"
+     style="display:none"></div>
 
 <!-- Sidebar -->
-<div class="sidebar">
+<div class="sidebar" :class="{ open: mobileNavOpen }">
   <h1>queue-worker</h1>
   <button :class="{ active: view === 'dashboard' }" @click="go('dashboard')">Dashboard</button>
   <button :class="{ active: view === 'list' }" @click="go('list'); loadTasks()">Tasks</button>
@@ -294,6 +333,7 @@ tr:hover { background: var(--bg2); cursor: pointer; }
           <button :class="{ active: statusFilter === s }" @click="statusFilter = s; loadTasks()" x-text="s"></button>
         </template>
       </div>
+      <div class="table-scroll" @scroll.passive="markScrolling($el)">
       <table>
         <thead><tr>
           <th style="cursor:pointer" @click="sortBy('id')">ID <span x-text="sortIcon('id')"></span></th>
@@ -315,7 +355,7 @@ tr:hover { background: var(--bg2); cursor: pointer; }
               <td><span class="badge" :class="'badge-' + t._status" x-text="t._status"></span></td>
               <td x-text="t.level || '?'"></td>
               <td x-text="t.priority || '?'"></td>
-              <td class="truncate" x-text="t.dir || '?'"></td>
+              <td x-text="t.dir || '?'"></td>
               <td style="white-space:nowrap; font-size:12px" x-text="fmtTime(t.created)"></td>
               <td style="white-space:nowrap; font-size:12px" x-text="fmtTime(t.finished_at)"></td>
             </tr>
@@ -325,6 +365,7 @@ tr:hover { background: var(--bg2); cursor: pointer; }
           </template>
         </tbody>
       </table>
+      </div>
     </div>
   </template>
 
@@ -736,7 +777,8 @@ tr:hover { background: var(--bg2); cursor: pointer; }
            :style="(usageRange === 'all' || usageRange === 'month') ? 'overflow-x: auto' : ''">
         <canvas id="usageChart" style="height: 300px" :style="(usageRange !== 'all' && usageRange !== 'month') ? 'width: 100%' : ''"></canvas>
       </div>
-      <table style="margin-top: 16px">
+      <div class="table-scroll" @scroll.passive="markScrolling($el)" style="margin-top: 16px">
+      <table>
         <thead><tr><th>Time</th><th>Usage %</th><th>Resets In</th><th>Status</th></tr></thead>
         <tbody>
           <template x-for="r in usageData.slice().reverse()" :key="r.datetime">
@@ -757,6 +799,7 @@ tr:hover { background: var(--bg2); cursor: pointer; }
           </template>
         </tbody>
       </table>
+      </div>
     </div>
   </template>
 
@@ -843,10 +886,17 @@ function app() {
     usageData: [],
     usageRange: 'week',
     _pollTimer: null,
+    mobileNavOpen: false,
 
     async init() {
       await this.loadStatus();
       setInterval(() => this.loadStatus(), 5000);
+      // Auto-close the mobile drawer when the viewport crosses up into
+      // desktop width — otherwise it stays "open" but invisible.
+      // matchMedia fires once per breakpoint cross, not per pixel like resize.
+      window.matchMedia('(min-width: 769px)').addEventListener('change', e => {
+        if (e.matches) this.mobileNavOpen = false;
+      });
     },
 
     get activePanel() {
@@ -867,7 +917,17 @@ function app() {
     go(v) { this.view = v; this.showContext = false; this.contextText = '';
             this.showOutput = false; this.outputLines = [];
             this.editMode = false; this.editForm = {};
-            this._stopTaskPoll(); this._resetFileState(); },
+            this._stopTaskPoll(); this._resetFileState();
+            this.mobileNavOpen = false; },
+
+    // Show a scrollbar thumb for ~800ms after each scroll so it's visible
+    // while the user is actively scrolling and fades away when idle.
+    // Timer stored on the element to avoid a global map across containers.
+    markScrolling(el) {
+      el.classList.add('is-scrolling');
+      clearTimeout(el._scrollIdleTimer);
+      el._scrollIdleTimer = setTimeout(() => el.classList.remove('is-scrolling'), 800);
+    },
 
     // ── Time formatting ──
     fmtTime(ts) {
