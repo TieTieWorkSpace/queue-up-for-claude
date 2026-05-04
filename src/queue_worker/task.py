@@ -51,6 +51,8 @@ class Task:
     checkpoint_file: Optional[str] = None
     duration_minutes: Optional[float] = None
     tokens_used: Optional[int] = None
+    cost_usd: Optional[float] = None              # USD billed for this run (from result.total_cost_usd)
+    actual_session_id: Optional[str] = None       # session UUID Claude used; locates ~/.claude/projects/<slug>/<uuid>.jsonl
 
     # ── written by human to resume from checkpoint ────────
     checkpoint_answer: Optional[str] = None
@@ -123,6 +125,8 @@ def parse_task(yaml_path: str) -> Task:
         checkpoint_file=raw.get('checkpoint_file'),
         duration_minutes=raw.get('duration_minutes'),
         tokens_used=raw.get('tokens_used'),
+        cost_usd=raw.get('cost_usd'),
+        actual_session_id=raw.get('actual_session_id'),
         checkpoint_answer=raw.get('checkpoint_answer'),
         resume_context=raw.get('resume_context'),
         session_id=raw.get('session_id'),
@@ -136,13 +140,19 @@ def augment_task(yaml_path: str, fields: dict) -> None:
     Merge `fields` into an existing task YAML file in-place.
     Preserves all existing keys. Uses safe_dump to write.
     Filters out None — use `update_task_yaml` if you need to delete keys.
+
+    Writes via tmp+rename so a crash mid-write (or a concurrent reader
+    like GET /api/tasks/{id}) never sees a half-written YAML.
     """
     with open(yaml_path, 'r') as f:
         data: dict = yaml.safe_load(f) or {}
     data.update({k: v for k, v in fields.items() if v is not None})
-    with open(yaml_path, 'w') as f:
+    target = Path(yaml_path)
+    tmp = target.with_suffix(target.suffix + '.tmp')
+    with open(tmp, 'w') as f:
         yaml.dump(data, f, default_flow_style=False,
                   allow_unicode=True, sort_keys=False)
+    tmp.replace(target)
 
 
 def update_task_yaml(yaml_path: str, set_fields: dict,

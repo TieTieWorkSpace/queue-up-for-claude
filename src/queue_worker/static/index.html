@@ -405,6 +405,21 @@ tr:hover { background: var(--bg2); cursor: pointer; }
           <template x-if="detail.duration_minutes"><dd x-text="detail.duration_minutes + ' min'"></dd></template>
           <template x-if="detail.tokens_used"><dt>Tokens</dt></template>
           <template x-if="detail.tokens_used"><dd x-text="detail.tokens_used?.toLocaleString()"></dd></template>
+          <template x-if="detail.cost_usd != null"><dt>Cost</dt></template>
+          <template x-if="detail.cost_usd != null"><dd x-text="'$' + Number(detail.cost_usd).toFixed(4)"></dd></template>
+          <template x-if="detail.actual_session_id"><dt>Transcript</dt></template>
+          <template x-if="detail.actual_session_id">
+            <dd>
+              <span class="mono" style="cursor:pointer; color:var(--accent)"
+                    @click="viewTranscript()"
+                    :title="'Open on-disk Claude Code transcript for this run (' + detail.actual_session_id + ')'"
+                    x-text="(detail.actual_session_id || '').slice(0,8) + '…' + (detail.actual_session_id || '').slice(-4)"></span>
+              <template x-if="transcript && !transcript.ok">
+                <span style="color:var(--text2)"
+                      x-text="' (' + (transcript.error || 'unavailable') + ')'"></span>
+              </template>
+            </dd>
+          </template>
           <template x-if="detail.stall_reason"><dt>Stall Reason</dt></template>
           <template x-if="detail.stall_reason"><dd x-text="detail.stall_reason"></dd></template>
           <template x-if="detail.stall_detail"><dt>Stall Detail</dt></template>
@@ -548,7 +563,7 @@ tr:hover { background: var(--bg2); cursor: pointer; }
         <template x-if="showOutput">
           <div style="margin-top: 16px">
             <h3 style="font-size: 14px; margin-bottom: 8px">Terminal Output</h3>
-            <div class="log-box output-scroll" style="max-height: 500px"><pre x-text="outputLines.join('\n') || 'No output recorded'"></pre></div>
+            <div class="log-box output-scroll" style="max-height: 70vh; overflow-y: auto"><pre style="margin:0" x-text="outputLines.join('\n') || 'No output recorded'"></pre></div>
           </div>
         </template>
       </div>
@@ -801,6 +816,7 @@ function app() {
     showOutput: false,
     outputLines: [],
     resume: null,
+    transcript: null,
     showFirstMsg: false,
     editMode: false,
     editForm: {},
@@ -954,29 +970,51 @@ function app() {
       this.showOutput = false;
       this.outputLines = [];
       this.resume = null;
+      this.transcript = null;
       this.showFirstMsg = false;
       this.editMode = false;
       this.editForm = {};
       this.view = 'detail';
       if (this.detail.session_id) this._loadResumeInfo(id);
+      if (this.detail.actual_session_id) this._loadTranscript(id);
       await this._checkTaskRunning(id);
       if (this.taskRunning) this._startTaskPoll(id);
     },
 
-    async _loadResumeInfo(id) {
-      // Guard against stale responses landing after the user navigated to
-      // another task. Compare against the currently-displayed task id at
-      // resolve time, not the id captured at call time.
+    async _loadTaskJson(id, path, key) {
+      // Fetch /api/tasks/{id}/{path} into this[key]. Guards against stale
+      // responses landing after the user has navigated to another task.
       try {
-        const r = await fetch(`/api/tasks/${id}/resume-info`);
+        const r = await fetch(`/api/tasks/${id}/${path}`);
         const j = await r.json();
         if (this.detail.id !== id) return;
-        this.resume = { ok: r.ok, ...j };
+        this[key] = { ok: r.ok, ...j };
       } catch(e) {
         if (this.detail.id !== id) return;
-        this.resume = { ok: false, error: 'fetch_failed', detail: String(e) };
+        this[key] = { ok: false, error: 'fetch_failed' };
       }
     },
+
+    _loadTranscript(id) { return this._loadTaskJson(id, 'transcript', 'transcript'); },
+
+    async viewTranscript() {
+      if (!this.transcript && this.detail.actual_session_id) {
+        await this._loadTranscript(this.detail.id);
+      }
+      const t = this.transcript;
+      if (!t || !t.ok || !t.transcript_path) {
+        this.notify(t?.error || 'Transcript not available');
+        return;
+      }
+      this.viewFile({
+        name: (t.session_id || 'session') + '.jsonl',
+        path: t.transcript_path,
+        kind: 'text',
+        size: t.file_size,
+      });
+    },
+
+    _loadResumeInfo(id) { return this._loadTaskJson(id, 'resume-info', 'resume'); },
 
     copyText(s) {
       try { navigator.clipboard.writeText(s); this.notify('Copied'); }
@@ -1000,11 +1038,17 @@ function app() {
         await this._pollOutput(id);
         if (!this.taskRunning) {
           this._stopTaskPoll();
-          // Refresh detail to show final state without resetting output
+          // Refresh detail to show final state without resetting output.
+          // actual_session_id only lands at this moment, so trigger the
+          // transcript fetch — otherwise the link wouldn't appear until
+          // the user reopens the task.
           try {
             const r = await fetch(`/api/tasks/${id}`);
             if (r.ok) this.detail = await r.json();
           } catch(e) {}
+          if (this.detail.actual_session_id && !this.transcript) {
+            this._loadTranscript(this.detail.id);
+          }
           this.notify('Task finished');
         }
       }, 3000);
@@ -1022,11 +1066,19 @@ function app() {
         if (r.ok) {
           const j = await r.json();
           if (j.lines.length > 0) {
+            // Sticky-bottom: only auto-scroll if the user was already near
+            // the bottom before the new lines arrived. If they've scrolled
+            // up to read older output, leave their position alone.
+            const box = document.querySelector('.output-scroll');
+            const wasAtBottom = !box ||
+              (box.scrollHeight - box.scrollTop - box.clientHeight < 40);
             this.outputLines.push(...j.lines);
-            this.$nextTick(() => {
-              const box = document.querySelector('.output-scroll');
-              if (box) box.scrollTop = box.scrollHeight;
-            });
+            if (wasAtBottom) {
+              this.$nextTick(() => {
+                const b = document.querySelector('.output-scroll');
+                if (b) b.scrollTop = b.scrollHeight;
+              });
+            }
           }
         }
       } catch(e) {}

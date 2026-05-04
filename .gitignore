@@ -17,7 +17,7 @@ build/
 
 # Runtime state — never check in
 logs/
-queue/running/
+queue/
 state/
 *.lock
 run.lock

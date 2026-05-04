@@ -598,6 +598,58 @@ def api_resume_info(task_id: str):
     return summary
 
 
+@app.get("/api/tasks/{task_id}/transcript")
+def api_transcript(task_id: str):
+    """Locate the on-disk Claude Code transcript for THIS run of a task.
+
+    Distinct from /resume-info: that one summarizes the conversation the task
+    will resume FROM (task.session_id, set at queue time). This one reports
+    where the transcript for the run we just performed lives (actual_session_id,
+    written by the executor when claude is spawned). Useful for: clicking
+    through to the full tool-by-tool trace from the dashboard.
+    """
+    from .task import parse_task
+    from .queue_ops import find_task_yaml
+    from . import sessions as sess
+
+    path = find_task_yaml(task_id)
+    if not path:
+        return JSONResponse({'error': 'task_not_found'}, status_code=404)
+    task = parse_task(str(path))
+    sid = task.actual_session_id
+    if not sid:
+        return JSONResponse({'error': 'no_actual_session_id'}, status_code=404)
+    if not sess.is_valid_session_id(sid):
+        return JSONResponse({
+            'error': 'invalid_session_id',
+            'detail': 'actual_session_id is not a UUID — possibly hand-edited YAML',
+        }, status_code=400)
+
+    project_dir = sess.project_dir_for(task.resolved_dir)
+    transcript = sess.find_transcript(task.resolved_dir, sid)
+    if transcript is None:
+        return JSONResponse({
+            'error': 'transcript_not_found',
+            'session_id': sid,
+            'expected_path': str(project_dir / f'{sid}.jsonl'),
+            'project_dir_exists': project_dir.exists(),
+        }, status_code=404)
+
+    try:
+        st = transcript.stat()
+    except OSError as e:
+        return JSONResponse({
+            'error': 'transcript_unreadable', 'detail': str(e),
+        }, status_code=422)
+
+    return {
+        'session_id': sid,
+        'transcript_path': str(transcript),
+        'project_dir': str(project_dir),
+        'file_size': st.st_size,
+    }
+
+
 # ── Routes: Logs ─────────────────────────────────────────────────────────────
 
 @app.get("/api/logs")

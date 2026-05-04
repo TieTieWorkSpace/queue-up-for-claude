@@ -321,12 +321,14 @@ def run_and_finalize(task: Task, log: TaskLogger) -> ExecuteResult:
         'stall_detail': result.stall_detail,
         'duration_minutes': round(result.duration_minutes, 1),
         'tokens_used': result.tokens_used,
+        'cost_usd': round(result.cost_usd, 6) if result.cost_usd is not None else None,
     })
     move_task(task, result.status)
 
     token_str = f' | tokens: {result.tokens_used}' if result.tokens_used else ''
+    cost_str = f' | ${result.cost_usd:.4f}' if result.cost_usd is not None else ''
     log.task(task.id,
-             f'-> {result.status} ({result.duration_minutes:.1f}min){token_str}'
+             f'-> {result.status} ({result.duration_minutes:.1f}min){token_str}{cost_str}'
              + (f' [{result.stall_reason}]' if result.stall_reason else ''))
     return result
 
