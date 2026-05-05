@@ -58,7 +58,7 @@ def extract_abstract(file_path: Path) -> str:
 
 def extract_episodic_abstract(episodic_path: Path) -> str:
     """
-    Read last 5 lines of episodic.jsonl and format a short summary.
+    Read last 5 lines of log/tasks.jsonl and format a short summary.
     """
     try:
         from collections import deque
@@ -81,18 +81,17 @@ def extract_episodic_abstract(episodic_path: Path) -> str:
     except FileNotFoundError:
         return '(no sessions recorded yet)'
     except OSError:
-        return '(could not read episodic log)'
+        return '(could not read tasks log)'
 
 
 # ── Reference file definitions ─────────────────────────────────────────────────
 
 AGENT_REF_FILES = [
     # (relative_path_in_agent_dir, section_label)
-    ('AGENT.md',              'Agent identity'),
-    ('CONTEXT.md',            'Project context'),
-    ('BEHAVIOR.md',           'Behavior rules'),
-    ('memory/procedural.md',  'Working procedures'),
-    ('memory/semantic.md',    'Learned project facts'),
+    ('ABOUT.md',      'Project + agent identity + rules'),
+    ('HOWTO.md',      'How to do things (commands)'),
+    ('NOTES.md',      'Non-obvious facts + pitfalls'),
+    ('DECISIONS.md',  'Why-we-chose-X + open questions'),
 ]
 
 
@@ -125,67 +124,102 @@ def build_reference_section(agent_dir: Path) -> str:
             '',
         ]
 
-    # Episodic log (special handling)
-    episodic = agent_dir / 'memory' / 'episodic.jsonl'
-    abstract = extract_episodic_abstract(episodic)
-    lines += [
-        '### Recent session history',
-        f'`{episodic}`',
-        f'> {abstract}',
-        '',
-    ]
+    # Recent session narratives — newest log/<date>.md, optional
+    log_dir = agent_dir / 'log'
+    if log_dir.is_dir():
+        recent_logs = sorted(log_dir.glob('*.md'), reverse=True)[:1]
+        if recent_logs:
+            log_file = recent_logs[0]
+            abstract = extract_abstract(log_file)
+            lines += [
+                '### Most recent session log',
+                f'`{log_file}`',
+                f'> {abstract}',
+                '',
+            ]
+
+    # Task event log (runner-only, runtime contract)
+    tasks_log = agent_dir / 'log' / 'tasks.jsonl'
+    if tasks_log.exists():
+        abstract = extract_episodic_abstract(tasks_log)
+        lines += [
+            '### Recent task history',
+            f'`{tasks_log}`',
+            f'> {abstract}',
+            '',
+        ]
 
     return '\n'.join(lines)
 
 
 # ── Output conventions section ─────────────────────────────────────────────────
 
-def build_output_conventions(task: Task, agent_dir: Path) -> str:
-    today = datetime.now().strftime('%Y%m%d')
-    briefing_path = agent_dir / 'briefings' / f'{today}.md'
-    checkpoint_path = agent_dir / 'checkpoints' / f'{today}-HHMMSS.yaml'
-    proposed_path = agent_dir / 'proposed' / f'semantic-{today}-HHMMSS.md'
-    dryrun_path = agent_dir / 'dry-run' / today
+def build_output_conventions(task: Task, agent_dir: Path, caps) -> str:
+    today_iso = datetime.now().strftime('%Y-%m-%d')
+    today_compact = datetime.now().strftime('%Y%m%d')
+    log_path = agent_dir / 'log' / f'{today_iso}.md'
+    checkpoint_path = agent_dir / 'inbox' / 'checkpoints' / f'{today_compact}-HHMMSS.yaml'
+    proposed_path = agent_dir / 'proposed' / f'notes-{today_compact}-HHMMSS.md'
+    dryrun_path = agent_dir / 'inbox' / 'dryrun' / today_compact
 
     lines = [
         '## Output conventions — always follow these',
         '',
-        f'**1. Briefing (mandatory)**: Your final action MUST be writing `{briefing_path}`.',
-        '   Do not exit without it. Format:',
+        f'**1. Session log (mandatory)**: Your final action MUST be writing `{log_path}`.',
+        '   Do not exit without it. Append to today\'s log file if it exists; do not',
+        '   overwrite. Format:',
         '   ```',
-        '   # Briefing — YYYYMMDD',
+        '   ---',
+        '   abstract: "One-sentence summary of this session."',
+        '   ---',
+        '   # Session — YYYY-MM-DD',
         '   task: <task_id>',
         '   status: done | partial | stalled',
-        '   files_changed: <n>',
-        '   commits: <n or none>',
         '',
         '   ## What I did',
         '   ## What I learned',
         '   ## Needs your attention',
         '   ```',
         '',
-        '**2. Checkpoint (when you hit a decision boundary)**:',
-        f'   Write `{checkpoint_path}` (use actual timestamp) then halt.',
-        '   Format:',
-        '   ```yaml',
-        '   question: "What decision do you need?"',
-        '   options: [option_a, option_b, option_c]',
-        '   agent_recommendation: option_a',
-        '   context_summary: "What you completed and what is pending."',
-        '   ```',
-        '',
-        '**3. Learning (when you discover a durable fact)**:',
-        f'   Write `{proposed_path}` (use actual timestamp).',
-        '   The human reviews and merges. Never edit semantic.md directly',
-        '   unless `write_agent_direct` is in your allowed capabilities.',
-        '',
     ]
 
-    if task.dry_run:
+    if 'write_checkpoint' in caps:
         lines += [
-            '**4. DRY RUN MODE**: Do NOT apply any changes.',
+            '**Checkpoint (when you hit a decision boundary)**:',
+            f'   Write `{checkpoint_path}` (use actual timestamp) then halt.',
+            '   Format:',
+            '   ```yaml',
+            '   question: "What decision do you need?"',
+            '   options: [option_a, option_b, option_c]',
+            '   agent_recommendation: option_a',
+            '   context_summary: "What you completed and what is pending."',
+            '   ```',
+            '',
+        ]
+
+    if 'write_agent_proposed' in caps:
+        lines += [
+            '**Learning (when you discover a durable fact)**:',
+            f'   Write `{proposed_path}` (use actual timestamp).',
+            '   The human reviews and merges into NOTES.md or DECISIONS.md.',
+            '   Never edit NOTES.md / DECISIONS.md directly unless `write_agent_direct`',
+            '   is in your allowed capabilities.',
+            '',
+        ]
+    elif 'write_agent_direct' in caps:
+        lines += [
+            '**Learning (when you discover a durable fact)**:',
+            '   Edit NOTES.md (facts/pitfalls) or DECISIONS.md (why/future) directly.',
+            '   Use section discipline: find the right section, merge or supersede an',
+            '   existing entry — never blind append. Do not commit.',
+            '',
+        ]
+
+    if task.dry_run and 'write_dryrun' in caps:
+        lines += [
+            '**DRY RUN MODE**: Do NOT apply any changes.',
             f'   Write all proposed changes as unified diffs to `{dryrun_path}/`.',
-            '   Include a summary in the briefing. Then write the briefing and halt.',
+            '   Include a summary in the session log. Then write the log and halt.',
             '',
         ]
 
@@ -259,7 +293,7 @@ def build_claude_md(task: Task) -> str:
     sections.append('')
 
     # Output conventions
-    sections.append(build_output_conventions(task, agent_dir))
+    sections.append(build_output_conventions(task, agent_dir, caps))
 
     sections.append('---')
     sections.append('')
@@ -287,9 +321,9 @@ def build_claude_md(task: Task) -> str:
             sections.append(task.resume_context.strip())
         sections.append('')
         sections.append(
-            'Read the most recent entry in `episodic.jsonl` and the checkpoint file '
-            'in `.agent/checkpoints/` to understand exactly where the previous session '
-            'stopped. Continue from there.'
+            'Read the most recent entry in `.agent/log/tasks.jsonl` and the checkpoint '
+            'file in `.agent/inbox/checkpoints/` to understand exactly where the '
+            'previous session stopped. Continue from there.'
         )
         sections.append('')
 

@@ -209,9 +209,14 @@ def augment_stall(task: Task, reason: str, detail: str,
 
 
 def append_episodic_entry(project_dir: str, entry: dict) -> None:
-    episodic = Path(project_dir) / '.agent' / 'memory' / 'episodic.jsonl'
-    episodic.parent.mkdir(parents=True, exist_ok=True)
-    with open(episodic, 'a', encoding='utf-8') as f:
+    """Append a JSONL event to .agent/log/tasks.jsonl (runtime contract; gitignored).
+
+    Schema: {ts: ISO-8601, task_id: str, status: str, stall_reason: str|None,
+             duration_s: float, ...} — see executor._write_episodic.
+    """
+    tasks_log = Path(project_dir) / '.agent' / 'log' / 'tasks.jsonl'
+    tasks_log.parent.mkdir(parents=True, exist_ok=True)
+    with open(tasks_log, 'a', encoding='utf-8') as f:
         f.write(json.dumps(entry, ensure_ascii=False) + '\n')
 
 

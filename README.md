@@ -1,10 +1,13 @@
 # queue-up-for-claude
 
-A usage-aware job queue for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+Two tools in one repo:
 
-You queue tasks against your projects. The runner sits idle most of the day and only spawns `claude -p` subprocesses during the last hour of your 5-hour Claude.ai usage window — so unused budget gets used instead of wiped at reset. Each task gets a fresh Claude session with a project-specific identity, capability boundaries, and rolling memory injected via `CLAUDE.md`.
+1. **`.agent/` — lightweight per-project agent memory.** A four-file scaffold (`ABOUT.md`, `HOWTO.md`, `NOTES.md`, `DECISIONS.md`) that gives an AI agent stable identity, a project map, accumulated learnings, and decision history that survive across sessions. `queue-worker init <dir>` drops it into any project; `queue-worker compile <dir>` renders a `CLAUDE.md` from the contents. Use it standalone — no queueing, no runner — to manage agent context across all your projects. See [agent-context.md](docs/agent-context.md).
+2. **A usage-aware job queue for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).** Queue tasks against projects that already have `.agent/` set up. The runner sits idle most of the day and only spawns `claude -p` subprocesses during the last hour of your 5-hour Claude.ai usage window — so unused budget gets used instead of wiped at reset. Each task gets a fresh Claude session with the project's `.agent/` content, capability boundaries, and rolling memory injected via `CLAUDE.md`.
 
-> **Unofficial.** Not affiliated with, endorsed by, or supported by Anthropic. Reads your Claude.ai plan usage by calling the same web endpoints the claude.ai UI uses with your `sessionKey` cookie. **This may violate Anthropic's Terms of Service.** See [Disclaimer](#disclaimer). If the cookie API ever stops working, this tool stops working — there is no browser-scraping fallback.
+The two pieces compose: the queue runner uses `.agent/`, but `.agent/` doesn't need the runner.
+
+> **Unofficial.** Not affiliated with, endorsed by, or supported by Anthropic. Reads your Claude.ai plan usage by calling the same web endpoints the claude.ai UI uses with your `sessionKey` cookie. **This may violate Anthropic's Terms of Service.** See [Disclaimer](#disclaimer). If the cookie API ever stops working, the queue piece stops working — there is no browser-scraping fallback. (The `.agent/` piece is unaffected — it's just files.)
 
 > ⚠️ **Full-disk file access.** This tool can read any file on your computer that your user account can read. Two reasons:
 > 1. The dashboard's file-browser API (`/api/files/list|read|raw`) is **not sandboxed** — it accepts any absolute path and resolves it via the OS. Anyone who can reach the dashboard can browse your whole home directory. Keep it on `127.0.0.1` / Tailscale and put a password on it before exposing it.
@@ -71,7 +74,7 @@ cp .env.example .env && chmod 0600 .env
 
 # Scaffold a project
 ./queue-worker init ~/projects/my-app
-# fill in .agent/AGENT.md, CONTEXT.md, BEHAVIOR.md (templates included)
+# fill in .agent/ABOUT.md and HOWTO.md (templates included)
 
 # Queue a task
 ./queue-worker add ~/projects/my-app "Add input validation to /signup" --level committer
@@ -79,6 +82,11 @@ cp .env.example .env && chmod 0600 .env
 # Start the dashboard + runner
 queue-worker-web
 # open http://localhost:51002
+
+# (Optional) install the bundled Claude Code skills:
+#   /queue <prompt>  — enqueue a follow-up task that resumes this conversation
+#   /condense        — distill end-of-session learnings into .agent/
+mkdir -p ~/.claude/skills && cp -r skills/queue skills/condense ~/.claude/skills/
 ```
 
 Usage is read by calling the same `/api/organizations/{uuid}/usage` endpoint the claude.ai UI uses, authenticated with your sessionKey cookie. See [docs/usage-checking.md](docs/usage-checking.md) for how to grab the cookie and how recovery works when the API reports the account is between 5-hour windows.
@@ -90,7 +98,7 @@ Usage is read by calling the same `/api/organizations/{uuid}/usage` endpoint the
 | Area | What | Read more |
 |---|---|---|
 | **Usage-aware runner** | Chilling/burning state machine, reset-anchored scheduling, HTTP usage check via claude.ai cookie API | [runner-state-machine.md](docs/runner-state-machine.md), [usage-checking.md](docs/usage-checking.md) |
-| **Per-project agent identity** | `.agent/` directory with AGENT/CONTEXT/BEHAVIOR + rolling memory (procedural / semantic / episodic), checkpoints, briefings, proposed memory edits | [agent-context.md](docs/agent-context.md) |
+| **Per-project agent identity** | `.agent/` directory: four-file core (`ABOUT.md`, `HOWTO.md`, `NOTES.md`, `DECISIONS.md`) plus lazy `log/`, `proposed/`, `inbox/`. Identity + rules + memory in plain-English files | [agent-context.md](docs/agent-context.md) |
 | **Capability boundaries** | Four levels (observer / craftsman / committer / deployer) compiled into ALLOWED / NOT ALLOWED sections of the injected `CLAUDE.md`; per-task overrides | [agent-context.md](docs/agent-context.md#capability-levels) |
 | **Web dashboard** | FastAPI + Alpine.js SPA at `localhost:51002` — task CRUD, live structured trace of each `claude -p` run (tool calls, file reads/writes, cost), link to the on-disk session transcript, file browser, usage chart, logs viewer. Mobile-friendly (hamburger nav at ≤768px) | [web-dashboard.md](docs/web-dashboard.md) |
 | **Auth + remote access** | Optional password gate with brute-force protection; instructions for Tailscale and Cloudflare Tunnel | [auth-and-remote-access.md](docs/auth-and-remote-access.md) |
@@ -109,6 +117,10 @@ queue-up-for-claude/
 ├── pyproject.toml          ← package metadata + entry points
 ├── config/profiles.yaml    ← capability level definitions
 ├── docs/                   ← per-feature documentation
+├── skills/                 ← optional Claude Code slash commands — copy into
+│   ├── queue/                ~/.claude/skills/. /queue enqueues a task that
+│   └── condense/             resumes the current conversation; /condense
+│                             distills end-of-session learnings into .agent/
 ├── src/queue_worker/       ← all Python code
 │   ├── cli.py              ← Click CLI commands + .agent/ templates
 │   ├── web.py              ← FastAPI dashboard + embedded runner thread

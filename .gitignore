@@ -15,10 +15,11 @@ build/
 .claude/
 .context/
 
-# Runtime state — never check in
-logs/
-queue/
-state/
+# Runtime state — never check in (anchored to repo root so we don't
+# shadow paths like skills/queue/)
+/logs/
+/queue/
+/state/
 *.lock
 run.lock
 usage_history.csv

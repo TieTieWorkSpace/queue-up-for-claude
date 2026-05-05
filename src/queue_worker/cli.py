@@ -250,187 +250,111 @@ def compile(project_dir, level):
 @main.command('init')
 @click.argument('project_dir')
 def init(project_dir):
-    """Scaffold a .agent/ directory in a project repo."""
+    """Scaffold a .agent/ directory in a project repo.
+
+    Creates four files at the root: ABOUT.md (identity + project + rules),
+    HOWTO.md (commands), NOTES.md (learned facts + pitfalls), DECISIONS.md
+    (why-we-chose-X + future plans). Subdirectories (log/, proposed/, inbox/)
+    are created lazily by the runner or by /condense when first needed.
+    """
     from .task import expand_path
     agent_dir = Path(expand_path(project_dir)) / '.agent'
-    memory_dir = agent_dir / 'memory'
-    for d in [agent_dir, memory_dir, agent_dir/'proposed',
-              agent_dir/'checkpoints', agent_dir/'dry-run', agent_dir/'briefings']:
-        d.mkdir(parents=True, exist_ok=True)
-    for path, tmpl in _TEMPLATES.items():
-        full = (agent_dir if '/' not in path else memory_dir) / path.split('/')[-1]
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    for name, tmpl in _TEMPLATES.items():
+        full = agent_dir / name
         if full.exists():
-            click.echo(f'  exists (skipping): {full.name}')
+            click.echo(f'  exists (skipping): {name}')
         else:
             full.write_text(tmpl, encoding='utf-8')
-            click.echo(f'  created: {full.name}')
-    episodic = memory_dir / 'episodic.jsonl'
-    if not episodic.exists():
-        episodic.touch()
-        click.echo('  created: episodic.jsonl')
+            click.echo(f'  created: {name}')
     gi = agent_dir / '.gitignore'
     if not gi.exists():
-        gi.write_text('proposed/*\ncheckpoints/*\ndry-run/*\n', encoding='utf-8')
+        gi.write_text(
+            '# Runtime contract — do not commit\n'
+            'log/tasks.jsonl\n'
+            '# Lazily-created session output\n'
+            'proposed/\n'
+            'inbox/\n',
+            encoding='utf-8',
+        )
         click.echo('  created: .gitignore')
-    # Write setup guide
-    guide = agent_dir / 'SETUP_GUIDE.md'
-    if not guide.exists():
-        guide.write_text(_SETUP_GUIDE, encoding='utf-8')
-        click.echo('  created: SETUP_GUIDE.md')
+    readme = agent_dir / 'README.md'
+    if not readme.exists():
+        readme.write_text(_AGENT_README, encoding='utf-8')
+        click.echo('  created: README.md')
 
     click.echo(f'\n.agent/ scaffolded in {agent_dir}')
     click.echo('\nNext steps:')
-    click.echo('  1. Read .agent/SETUP_GUIDE.md for detailed instructions')
-    click.echo('  2. Fill in each .md file (start with AGENT.md and CONTEXT.md)')
-    click.echo('  3. Replace every "REPLACE THIS" abstract with a real summary')
+    click.echo('  1. Skim .agent/README.md (permanent reference for the .agent system)')
+    click.echo('  2. Fill in ABOUT.md (start here) and HOWTO.md')
+    click.echo('  3. Leave NOTES.md and DECISIONS.md mostly empty — /condense fills them over time')
     click.echo('  4. git add .agent/ && git commit -m "chore: add .agent/ context"')
-    click.echo(f'  5. queue-worker add {agent_dir.parent} "your first task" --level craftsman')
+    click.echo(f'  5. (Optional) queue-worker add {agent_dir.parent} "your first task" --level craftsman')
 
 
 _TEMPLATES = {
-    'AGENT.md': '''\
+    'ABOUT.md': '''\
 ---
-abstract: "REPLACE THIS: 1-2 sentences describing who the agent is and what
-           project it works on. This abstract is shown to the agent so it can
-           decide whether to read the full file. Be specific."
----
-
-<!-- HOW TO FILL THIS IN:
-     The abstract above is the most important part. It appears in every
-     generated CLAUDE.md. Write it as if briefing a new teammate in 2 sentences.
-
-     Below, describe the agent's role, specialty, and goals for this project.
-     Be concrete: "senior backend engineer" is better than "developer".
-     The agent reads this at the start of every task to understand its identity.
--->
-
-# Agent identity
-
-You are a [ROLE, e.g. "senior backend engineer", "full-stack developer"]
-working on [PROJECT NAME, e.g. "Acme SaaS invoice platform"].
-
-## Specialty
-<!-- What does this agent know best about this project? e.g.
-     "TypeScript/React frontend, REST API design, PostgreSQL optimization" -->
-
-## Goals
-<!-- What should the agent optimize for when working on tasks? -->
-- [e.g. "Ship clean, tested code that follows existing patterns"]
-- [e.g. "Never break the CI pipeline"]
-- [e.g. "Prefer small, focused changes over large refactors"]
-''',
-
-    'CONTEXT.md': '''\
----
-abstract: "REPLACE THIS: 1-2 sentences describing the project, its tech stack,
-           and key architectural choices. This helps the agent understand what
-           it's working with before reading the full file."
+abstract: "REPLACE THIS: one sentence on what this project is + one on the
+           agent's role. Surfaces in every generated CLAUDE.md."
 ---
 
-<!-- HOW TO FILL THIS IN:
-     This is the agent's map of the codebase. Include enough detail that a
-     new engineer could navigate the project after reading this file.
+# About this project and agent
 
-     Key things to cover:
-     - What the project IS (product, purpose, scale)
-     - Tech stack (language, framework, database, key libraries)
-     - Architecture (monorepo? microservices? module boundaries?)
-     - Important conventions (file naming, directory structure)
-     - External dependencies (APIs, services, infrastructure)
--->
+## Project
+<!-- What this is, in 2-4 sentences:
+     - product / purpose / scale (e.g. "B2B invoice SaaS, ~50k LOC, 3 engineers")
+     - tech stack (language, framework, database, key libraries)
+     - architecture (monorepo? module boundaries? data flow?) -->
 
-# Project context
+## Agent
+<!-- Who the agent is for this project (role + specialty + goals).
+     Optional — leave blank if the default "competent engineer in this
+     codebase" is fine. -->
 
-## What this is
-<!-- e.g. "B2B SaaS for invoice management. ~50k LOC, 3 engineers." -->
+- Role: <!-- e.g. "senior backend engineer" -->
+- Specialty: <!-- e.g. "REST API design, PostgreSQL optimization" -->
+- Goals: <!-- e.g. "ship tested code, follow existing patterns" -->
 
-## Tech stack
-- Language / framework: <!-- e.g. "TypeScript, React 18, Express.js" -->
-- Database: <!-- e.g. "PostgreSQL 15 with Prisma ORM" -->
-- Key libraries: <!-- e.g. "TailwindCSS, Zod, React Query" -->
-- CI/CD: <!-- e.g. "GitHub Actions, deploys to Vercel" -->
+## Rules
 
-## Architecture
-<!-- Describe the high-level structure:
-     - Directory layout (e.g. "monorepo: packages/web, packages/api, packages/shared")
-     - Key module boundaries (e.g. "all API routes in src/routes/, all DB queries in src/db/")
-     - Data flow (e.g. "React -> API -> Prisma -> PostgreSQL")
-     - Important patterns (e.g. "repository pattern for DB access, middleware for auth")
--->
+### Always
+<!-- Things the agent must do on every task -->
+- [e.g. "Run tests before committing"]
+- [e.g. "Use conventional commits (feat:, fix:, refactor:)"]
 
-## Important conventions
-<!-- Things every agent MUST know to avoid breaking things:
-     - e.g. "All API responses use { data, error } envelope"
-     - e.g. "Database migrations are in prisma/migrations/, never edit existing ones"
-     - e.g. "Environment variables are in .env.local, never commit .env"
--->
-''',
-
-    'BEHAVIOR.md': '''\
----
-abstract: "REPLACE THIS: 1-2 sentences summarizing the key rules. e.g.
-           'Always run tests before committing. Never modify migrations.
-           Use conventional commits.'"
----
-
-<!-- HOW TO FILL THIS IN:
-     This file defines hard rules the agent must follow. Think of it as
-     "things that would make you reject a PR". Be specific and concrete.
-
-     The agent checks this before every action. If a rule here conflicts
-     with a task prompt, this file wins.
--->
-
-# Behavior rules
-
-## Always
-<!-- Things the agent must do on every task: -->
-- [e.g. "Run the test suite before committing any changes"]
-- [e.g. "Use conventional commit messages (feat:, fix:, refactor:)"]
-- [e.g. "Add tests for new functions"]
-- [e.g. "Keep changes focused -- one concern per commit"]
-
-## Never
-<!-- Hard prohibitions: -->
-- [e.g. "Never modify existing database migration files"]
+### Never
+<!-- Hard prohibitions -->
+- [e.g. "Never modify existing migration files"]
 - [e.g. "Never push directly to main"]
-- [e.g. "Never delete .env.example or .gitignore"]
-- [e.g. "Never install new dependencies without noting in the briefing"]
 
-## Code style
-<!-- Formatting, naming, patterns the agent should follow: -->
-<!-- e.g. "Use single quotes for strings"
-     e.g. "Name files in kebab-case"
-     e.g. "Prefer async/await over .then() chains"
-     e.g. "Use TypeScript strict mode -- no `any` types" -->
+### Code style
+<!-- e.g. "TypeScript strict mode, no any. Single quotes. kebab-case files." -->
+
+## Conventions
+<!-- Non-obvious project conventions a newcomer would miss:
+     - e.g. "API responses use { data, error } envelope"
+     - e.g. "Migrations in prisma/migrations/ — never edit existing"
+     - e.g. "Environment vars in .env.local; .env.production for prod" -->
 ''',
 
-    'memory/procedural.md': '''\
+    'HOWTO.md': '''\
 ---
-abstract: "REPLACE THIS: list the key commands. e.g. 'Test: npm test.
-           Lint: npm run lint. Build: npm run build. Dev: npm run dev (port 3000).'"
+abstract: "REPLACE THIS: list key commands. e.g. 'Test: npm test. Lint: npm
+           run lint. Build: npm run build. Dev: npm run dev (port 3000).'"
 ---
 
-<!-- HOW TO FILL THIS IN:
-     List every command the agent might need to run. Be exact -- include
-     flags, environment variables, and prerequisites.
-
-     The agent reads this to know HOW to do things (test, build, lint, deploy).
-     If a command has gotchas (e.g. "must run from repo root"), note them.
--->
-
-# Working procedures
+# How to do things
 
 ## Run tests
 ```
 [e.g. npm test]
 ```
-<!-- Notes: e.g. "Requires test DB running: docker compose up -d postgres-test" -->
+<!-- Notes: prerequisites, flags, single-test invocation -->
 
 ## Lint / format
 ```
-[e.g. npm run lint]
-[e.g. npm run lint:fix]
+[e.g. npm run lint && npm run lint:fix]
 ```
 
 ## Build
@@ -438,17 +362,16 @@ abstract: "REPLACE THIS: list the key commands. e.g. 'Test: npm test.
 [e.g. npm run build]
 ```
 
-## Start dev server
+## Run dev server
 ```
 [e.g. npm run dev]
 ```
-<!-- Notes: e.g. "Runs on port 3000, requires .env.local" -->
+<!-- Port, env vars, prerequisites -->
 
 ## Deploy
 ```
 [e.g. npm run deploy:staging]
 ```
-<!-- Notes: e.g. "Requires VPN connection" -->
 
 ## Database migrations
 ```
@@ -456,221 +379,121 @@ abstract: "REPLACE THIS: list the key commands. e.g. 'Test: npm test.
 ```
 
 ## Other useful commands
-<!-- Add any project-specific commands:
-     e.g. "Generate types: npm run codegen"
-     e.g. "Seed database: npm run db:seed"
-     e.g. "Run single test: npm test -- --grep 'test name'" -->
+<!-- Generate types, seed DB, run a single test, etc. -->
 ''',
 
-    'memory/semantic.md': '''\
+    'NOTES.md': '''\
 ---
-abstract: "Learned facts about this project. Updated by the agent over time
-           as it discovers things. Human reviews and merges proposals."
+abstract: "Non-obvious facts and pitfalls about this project. Grows over
+           time as /condense distills lessons from sessions. Hand-curated."
 ---
 
-# Semantic memory
+# Notes
 
-<!-- This file is populated over time as the agent works on tasks.
-     The agent writes proposed additions to .agent/proposed/ -- you review
-     and merge useful facts here.
+Facts about this codebase that are not obvious from reading the code.
+Each entry should answer: "What would I assume that is wrong, and what is the
+truth?"
 
-     Examples of what goes here:
-     - "The auth middleware at src/middleware/auth.ts caches JWT verification
-        for 5 minutes -- don't add a second cache layer"
-     - "Tests in packages/api use a shared test DB that resets between runs"
-     - "The deploy script requires AWS_PROFILE=staging to be set"
+## Things that look like dead code but aren't
+<!-- Decorator-registered handlers, test seams, JSON-shape compat fields, etc.
+     Empty until you discover one. -->
 
-     You can also add facts manually if you know something the agent should
-     learn without having to discover it the hard way. -->
+## Pitfalls
+<!-- Gotchas that bit you or the agent. The "would another agent step on this
+     same landmine?" test gates entry here. Empty until something earns its way in. -->
+
+## Architecture quirks
+<!-- Non-obvious design choices: lock semantics, recovery flows, ordering
+     constraints, security trade-offs. -->
+''',
+
+    'DECISIONS.md': '''\
+---
+abstract: "Why we chose what we chose. Open questions and future plans live
+           here too, with status fields. Grows slowly."
+---
+
+# Decisions
+
+Each entry: a date, a decision, a status, a short rationale. Statuses:
+`proposed` (open question / future plan), `accepted` (decided + in effect),
+`superseded` (replaced — link to the replacement), `rejected` (considered + dropped).
+
+When this file passes ~400 lines or you find yourself wanting to link to a
+specific decision from a commit, split into `decisions/NNNN-slug.md`.
+
+---
+
+## Template
+
+### YYYY-MM-DD — short title
+- **Status**: proposed | accepted | superseded | rejected
+- **Context**: 1-2 sentences on what was at stake
+- **Decision**: what we chose
+- **Why**: 1-3 sentences. Mention rejected alternatives.
+- **Supersedes / superseded by**: link if applicable
+
+---
+
+<!-- Real entries below. Delete this template block once you have one. -->
 ''',
 }
 
-_SETUP_GUIDE = '''\
-# .agent/ Setup Guide
+_AGENT_README = '''\
+# .agent/
 
-This directory contains context files that queue-worker uses to brief the
-AI agent before each task. Fill in each file to get better results.
+Per-project agent memory and identity. Survives across sessions; gets
+injected into the generated `CLAUDE.md` whenever an AI agent works on
+this codebase.
 
-**Delete this guide once you're done setting up.**
+This scaffold ships with [queue-up-for-claude](https://github.com/TieTieWorkSpace/queue-up-for-claude),
+a usage-aware Claude Code job queue. It works **standalone** without the
+queueing piece — drop it into any project to give an agent stable identity
+and accumulating learnings:
 
----
+- `queue-worker init <dir>` — scaffold this structure in any project.
+- `queue-worker compile <dir>` — render a `CLAUDE.md` from the contents
+  for use with interactive Claude Code.
+- `/condense` skill — distill end-of-session learnings into `NOTES.md` and
+  `DECISIONS.md` with section discipline.
 
-## Quick checklist
+## Files
 
-- [ ] Fill in `AGENT.md` -- who the agent is for this project
-- [ ] Fill in `CONTEXT.md` -- what the project is, tech stack, architecture
-- [ ] Fill in `BEHAVIOR.md` -- rules the agent must follow
-- [ ] Fill in `memory/procedural.md` -- commands to test, build, deploy
-- [ ] Replace every `"REPLACE THIS"` abstract with a real 1-2 sentence summary
-- [ ] Commit: `git add .agent/ && git commit -m "chore: add .agent/ context"`
-
----
-
-## How it works
-
-Each `.md` file has YAML frontmatter with an `abstract:` field:
-
-```markdown
----
-abstract: "This 1-2 sentence summary is shown to the agent so it can decide
-           whether to read the full file."
----
-
-# Full content below...
-```
-
-The abstract is critical -- it appears in every task context. Write it as if
-briefing a colleague in a Slack message: short, specific, informative.
-
-**Bad abstract:** "Information about the project"
-**Good abstract:** "React 18 + Express monorepo. PostgreSQL with Prisma ORM.
-                    All API routes in packages/api/src/routes/."
-
----
-
-## File-by-file guide
-
-### AGENT.md -- Who is the agent?
-
-Define the agent's role and goals. This shapes how it approaches tasks.
-
-**What to write:**
-- Role: "senior backend engineer", "full-stack developer", etc.
-- Project name: the specific project this .agent/ directory is in
-- Specialty: what the agent knows best about THIS project
-- Goals: what to optimize for (test coverage? shipping speed? code quality?)
-
-**Example:**
-```markdown
----
-abstract: "Senior TypeScript engineer working on Acme invoice platform.
-           Specializes in API design and PostgreSQL query optimization."
----
-
-# Agent identity
-
-You are a senior TypeScript engineer working on Acme.
-
-## Specialty
-REST API design, Prisma ORM, PostgreSQL performance.
-
-## Goals
-- Ship tested, type-safe code
-- Keep API response times under 200ms
-- Follow existing patterns in the codebase
-```
-
-### CONTEXT.md -- What is the project?
-
-This is the agent's map. Include enough detail to navigate without asking.
-
-**What to write:**
-- What the product IS (1-2 sentences)
-- Full tech stack (language, framework, database, key libraries)
-- Architecture (directory layout, module boundaries, data flow)
-- Conventions (file naming, patterns, things that would surprise a newcomer)
-
-**Example:**
-```markdown
----
-abstract: "B2B invoice SaaS. React 18 + Vite frontend, Express API,
-           PostgreSQL 15 with Prisma. Monorepo with packages/web and packages/api."
----
-
-# Project context
-
-## What this is
-Invoice management platform for small businesses. ~50k LOC, 3 engineers.
-
-## Tech stack
-- Frontend: React 18, Vite, TailwindCSS, React Query
-- API: Express.js, TypeScript strict mode
-- Database: PostgreSQL 15, Prisma ORM
-- Auth: JWT with refresh tokens
-- CI: GitHub Actions, deploys to Vercel (frontend) and Fly.io (API)
-
-## Architecture
-Monorepo: packages/web, packages/api, packages/shared (types).
-All API routes: packages/api/src/routes/<resource>.ts
-All DB queries: packages/api/src/db/<resource>.ts (repository pattern)
-Shared types: packages/shared/src/types/<resource>.ts
+| File | What | Who fills |
+|---|---|---|
+| `ABOUT.md` | Project + agent identity + rules | Human, once |
+| `HOWTO.md` | Commands (test, lint, build, deploy, dev) | Human, edits over time |
+| `NOTES.md` | Non-obvious facts and pitfalls | `/condense` mostly, hand-curated |
+| `DECISIONS.md` | Why-X + future plans + open questions | `/condense` mostly, hand-curated |
+| `log/<date>.md` | Daily session narrative | `/condense`, lazy |
+| `log/tasks.jsonl` | Runner event log (gitignored) | Runner, lazy |
+| `proposed/` | Agent edits awaiting human review | Lazy, opt-in |
+| `inbox/` | Checkpoints + dry-run output from autonomous runs | Lazy |
 
 ## Conventions
-- API responses always use { data, error } envelope
-- Database migrations in prisma/migrations/ -- never edit existing ones
-- Environment: .env.local for dev, .env.production for prod (never committed)
-- Feature flags in src/config/features.ts
-```
 
-### BEHAVIOR.md -- What are the rules?
+- Every `.md` starts with a `--- abstract: "..." ---` frontmatter block.
+  The injector surfaces this in every generated CLAUDE.md so the agent can
+  decide which files to read in full. If missing, it silently falls back to
+  the first paragraph.
+- `/condense` follows **section discipline**: find the right section, merge
+  or supersede an existing entry — never blind append. This keeps
+  NOTES/DECISIONS from becoming chronological junk drawers.
+- `DECISIONS.md` graduates to `decisions/NNNN-slug.md` once it passes ~400
+  lines or you start wanting to link to a specific decision from a commit.
+- `log/tasks.jsonl` is a runtime contract written by the queue-worker
+  runner — do not hand-edit.
 
-Hard rules the agent must follow. Think "things that would make you reject a PR."
+## First-time setup
 
-**What to write:**
-- "Always" rules: things to do on every task
-- "Never" rules: hard prohibitions
-- Code style: formatting, naming, patterns
+- [ ] Fill in `ABOUT.md` (start here)
+- [ ] Fill in `HOWTO.md` (just the commands you actually use)
+- [ ] Replace every `REPLACE THIS` abstract with a real one
+- [ ] `git add .agent/ && git commit -m "chore: add .agent/ context"`
+- [ ] (Optional, queueing only) `queue-worker add . "your first task" --level craftsman`
 
-**Example:**
-```markdown
----
-abstract: "Always run tests before committing. Use conventional commits.
-           Never modify migrations. No `any` types in TypeScript."
----
+## Full reference
 
-# Behavior rules
-
-## Always
-- Run `npm test` before committing
-- Use conventional commits (feat:, fix:, refactor:, chore:)
-- Add tests for new public functions
-- Update types in packages/shared when changing API contracts
-
-## Never
-- Modify existing migration files (create new ones instead)
-- Push directly to main
-- Use `any` type in TypeScript
-- Delete .env.example or .gitignore
-```
-
-### memory/procedural.md -- How to test, build, deploy?
-
-Every command the agent might need. Be exact -- include flags and prerequisites.
-
-**What to write:**
-- Test command (and how to run a single test)
-- Lint/format command
-- Build command
-- Dev server command (and what port)
-- Deploy command (and any prerequisites)
-- Database migration command
-- Any project-specific commands
-
-### memory/semantic.md -- What has the agent learned?
-
-Starts empty. Over time, the agent proposes additions to `.agent/proposed/`.
-You review and merge useful facts here.
-
-You can also pre-populate it with things you know the agent should learn:
-- Tricky bugs and their root causes
-- Performance-sensitive code paths
-- External API quirks
-- "Don't touch this because..." explanations
-
----
-
-## After filling in the files
-
-1. Commit the .agent/ directory to your repo
-2. Add a task: `queue-worker add /path/to/this/project "your task" --level craftsman`
-3. The agent will read these files at the start of every task
-
-## Tips
-
-- **Be specific.** "Use TypeScript" is less useful than "TypeScript strict mode,
-  no `any`, prefer `unknown` for external data."
-- **Update over time.** As the project evolves, update these files.
-  The agent proposes updates to semantic.md automatically.
-- **Start minimal.** You don't need to fill in everything on day one.
-  AGENT.md and CONTEXT.md are the most important. The rest can be added later.
+The canonical doc is at `docs/agent-context.md` in the queue-up-for-claude
+repo: <https://github.com/TieTieWorkSpace/queue-up-for-claude/blob/main/docs/agent-context.md>
 '''

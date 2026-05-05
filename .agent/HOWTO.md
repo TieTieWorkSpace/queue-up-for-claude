@@ -4,7 +4,7 @@ abstract: "Test: pytest tests/. Lint: pyflakes src/queue_worker/. Install:
            or playwright needed."
 ---
 
-# Working procedures
+# How to do things
 
 ## Activate venv
 

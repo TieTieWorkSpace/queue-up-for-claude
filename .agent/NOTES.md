@@ -1,10 +1,10 @@
 ---
-abstract: "Non-obvious facts about this codebase, learned across past sessions.
-           Includes intentional design choices that look like dead code, lock
-           rationales, security choices, and recovery flows."
+abstract: "Non-obvious facts and pitfalls. Intentional design choices that
+           look like dead code, lock rationales, security choices, recovery
+           flows, codex-tooling gotchas."
 ---
 
-# Semantic memory
+# Notes
 
 Facts about this codebase that aren't obvious from reading the code, organized
 by where they bite. Each entry should answer: "What would I assume that's
@@ -20,13 +20,14 @@ wrong, and what's the truth?"
   `fail_task` / `stall_task` but never read by any code. It's kept on disk
   for `grep "status: failed" queue/failed/` value when a human is debugging.
   Codex flagged it as drop-able; we kept it. Don't re-flag.
-- **`UsageCheckResult.backend` field** is now always `'http'` since the
-  Playwright path was removed. Kept for JSON-shape compat with anyone scripting
-  against `/api/status`. Don't drop without a version bump.
 - **`tick_seconds` parameter in `start_runner`** has no production override.
   Kept as a test seam — `test_run_policy.py` and others rely on overriding it.
-- **`SCREENSHOT_*` constants** — wait, no, those were removed with the
-  Playwright path. If you see one, it's dead. Delete.
+- **`RunnerState` diagnostic fields** (`last_anchor_at`, `last_anchor_kind`,
+  `pre_reset_done_for_cycle`, `t_minus_60_done_for_cycle`) are exposed in the
+  `/api/status` JSON but not consumed by the bundled dashboard. Useful for
+  ad-hoc debugging via `curl /api/status` when reset-anchor behavior looks
+  off — keep them. The persistence allowlist `_PERSISTED_FIELDS` deliberately
+  excludes the ones that should re-derive on restart.
 
 ## Lock semantics
 
@@ -135,3 +136,23 @@ the value silently ignored. **Renaming** a field requires a migration path.
 - HTTPS doesn't work — the gh-cli token expired and hasn't been re-auth'd.
 - The harness blocks direct pushes to `main` without explicit user
   confirmation. Asking the user is the right move; don't try to bypass.
+
+## Pitfalls
+
+Gotchas that have bitten past sessions. Generalizability test gates entry
+here ("would another agent step on this same landmine?").
+
+- **`codex exec` OOM-kills on large codebases with `model_reasoning_effort=high`
+  + `--enable web_search_cached`.** Exit code 137 = SIGKILL = OOM. Reproduced
+  twice on the round-3 cleanup attempt. Mitigation: use `medium` effort and
+  skip web_search for surveys; reserve `high` for tightly-scoped diff reviews
+  where the input is a few hundred lines.
+- **Function signature changes that span CLI + web + runner** ship `TypeError`
+  to the unchecked surface if you only `grep` two of three. A previous cleanup
+  removed `check_interval_seconds` from `start_runner()` but `web.py:_background_runner`
+  still passed it. Lesson: when changing a signature used by multiple entry
+  points, grep all of them — codex's second pass caught this one.
+- **Stale comments referencing removed features** (Playwright, HH:55 schedule,
+  `--fork-session`, `os.environ.copy()`) have shipped to main multiple times
+  because the cleanup focused on code, not adjacent prose. Always grep
+  comment-text for removed feature names after a rip-out.

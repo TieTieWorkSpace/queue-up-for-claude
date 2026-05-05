@@ -356,7 +356,7 @@ def _run_claude(cmd: list[str], cwd: str,
 
 
 def _find_new_checkpoint(agent_dir: Path, since: float) -> Optional[Path]:
-    checkpoints = agent_dir / 'checkpoints'
+    checkpoints = agent_dir / 'inbox' / 'checkpoints'
     if not checkpoints.exists():
         return None
     for f in sorted(checkpoints.glob('*.yaml')):
@@ -472,15 +472,15 @@ def execute_task(task: Task, log: TaskLogger) -> ExecuteResult:
         # b) Dry-run?
         if task.dry_run:
             today = datetime.now().strftime('%Y%m%d')
-            dryrun_dir = agent_dir / 'dry-run' / today
+            dryrun_dir = agent_dir / 'inbox' / 'dryrun' / today
             if dryrun_dir.exists():
                 log.task(task.id, 'dry-run output detected')
                 augment_stall(task, 'dry_run_complete',
-                              f'Proposed changes in .agent/dry-run/{today}/')
+                              f'Proposed changes in .agent/inbox/dryrun/{today}/')
                 _write_episodic(task, 'unfinished', 'dry_run_complete',
                                 duration, tokens_used, cost_usd)
                 return ExecuteResult('unfinished', 'dry_run_complete',
-                                    f'Review .agent/dry-run/{today}/',
+                                    f'Review .agent/inbox/dryrun/{today}/',
                                     duration, tokens_used, cost_usd)
 
         # c) Timeout?
@@ -502,9 +502,9 @@ def execute_task(task: Task, log: TaskLogger) -> ExecuteResult:
             return ExecuteResult('failed', None, detail, duration, tokens_used, cost_usd)
 
         # e) Success
-        briefing = agent_dir / 'briefings' / f'{datetime.now().strftime("%Y%m%d")}.md'
-        if not briefing.exists():
-            log.task(task.id, 'warning: agent did not write a briefing')
+        log_path = agent_dir / 'log' / f'{datetime.now().strftime("%Y-%m-%d")}.md'
+        if not log_path.exists():
+            log.task(task.id, 'warning: agent did not write a session log')
         log.task(task.id, f'done ({duration:.1f}min)')
         _write_episodic(task, 'done', None, duration, tokens_used, cost_usd)
         return ExecuteResult('done', duration_minutes=duration,
